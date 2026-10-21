@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type * as Leaflet from 'leaflet';
+import type {} from '@tomickigrzegorz/leaflet-rotate';
 import type { Incident, MapAggregate } from '@/data';
 
 type MapMode = 'clusters' | 'heat';
@@ -13,6 +14,8 @@ type Props = {
   routeAlternatives?: Array<{id:string;coordinates:[number,number][];selected:boolean}>;
   currentPosition?: {lat:number;lon:number}|null;
   navigationActive?: boolean;
+  navigationHeading?: number|null;
+  headingUp?: boolean;
   mode?: MapMode;
   visibleTypes?: {crime:boolean;traffic_accident:boolean};
   onAggregateSelect?: (item: MapAggregate) => void;
@@ -24,7 +27,7 @@ function isAggregate(value: Incident | MapAggregate): value is MapAggregate {
 
 const colors = { crime: '#c94358', traffic_accident: '#e78a33', other: '#1f8a70' } as const;
 
-export function MapView({ incidents, onPick, selected, routeLine, routeAlternatives, currentPosition, navigationActive = false, mode = 'clusters', visibleTypes = {crime:true,traffic_accident:true}, onAggregateSelect }: Props) {
+export function MapView({ incidents, onPick, selected, routeLine, routeAlternatives, currentPosition, navigationActive = false, navigationHeading = null, headingUp = true, mode = 'clusters', visibleTypes = {crime:true,traffic_accident:true}, onAggregateSelect }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const leaflet = useRef<typeof import('leaflet') | null>(null);
   const map = useRef<Leaflet.Map | null>(null);
@@ -40,10 +43,11 @@ export function MapView({ incidents, onPick, selected, routeLine, routeAlternati
   useEffect(() => {
     if (!container.current || map.current) return;
     let cancelled = false;
-    void import('leaflet').then(({default:L}) => {
+    void Promise.all([import('leaflet'),import('@tomickigrzegorz/leaflet-rotate')]).then(([{default:L}]) => {
       if (cancelled || !container.current) return;
       leaflet.current = L;
-      const instance = L.map(container.current,{center:[51.108,71.43],zoom:12,zoomControl:true,preferCanvas:true});
+      const instance = L.map(container.current,{center:[51.108,71.43],zoom:12,zoomControl:false,preferCanvas:true,rotate:true,touchRotate:false,dragRotate:false});
+      L.control.zoom({position:'bottomright'}).addTo(instance);
       L.tileLayer(process.env.NEXT_PUBLIC_OSM_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
         maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>',
       }).addTo(instance);
@@ -151,13 +155,20 @@ export function MapView({ incidents, onPick, selected, routeLine, routeAlternati
   },[ready,selected,routeLine,routeAlternatives,navigationActive,currentPosition]);
 
   useEffect(() => {
+    const instance=map.current;
+    if(!instance||!ready)return;
+    if(!navigationActive||!headingUp){instance.stopHeadingUp();instance.setBearing(0);return;}
+    if(navigationHeading!==null)instance.setHeading(navigationHeading,{ease:0.18,deadzone:1});
+  },[navigationActive,headingUp,navigationHeading,ready]);
+
+  useEffect(() => {
     const instance=map.current,L=leaflet.current;
     if(!instance||!L||!ready)return;
     if(!currentPosition){positionMarker.current?.remove();positionMarker.current=null;return;}
     const latlng:Leaflet.LatLngExpression=[currentPosition.lat,currentPosition.lon];
     if(positionMarker.current)positionMarker.current.setLatLng(latlng);
     else positionMarker.current=L.circleMarker(latlng,{radius:8,color:'#fff',weight:3,fillColor:'#2478e5',fillOpacity:1}).addTo(instance).bringToFront();
-    if(navigationActive)instance.panTo(latlng,{animate:true,duration:0.35});
+    if(navigationActive)instance.panTo(latlng,{animate:true,duration:0.65});
   },[currentPosition,navigationActive,ready]);
 
   return <div className="map-canvas" ref={container} aria-label="Интерактивная карта маршрута"/>;

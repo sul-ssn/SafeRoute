@@ -134,6 +134,30 @@ export function advanceManeuverOneStep(current, maneuvers, previousProgress, pro
   return progress >= threshold && (crossed || movedSinceLastAdvance) ? current + 1 : current;
 }
 
+const voiceWarningMeters = { foot: 100, bicycle: 450, car: 750, motorcycle: 550 };
+const voiceRepeatMeters = { foot: 30, bicycle: 110, car: 180, motorcycle: 140 };
+
+export function nextVoiceCue(routeId, maneuverIndex, instruction, remainingMeters, profile, announced) {
+  if (!instruction || !Number.isFinite(remainingMeters)) return null;
+  const key = `${routeId}:${maneuverIndex}`;
+  const repeatAt = voiceRepeatMeters[profile] ?? voiceRepeatMeters.foot;
+  const warningAt = voiceWarningMeters[profile] ?? voiceWarningMeters.foot;
+  if (maneuverIndex === 0 && remainingMeters > warningAt && !announced.has(`${key}:start`)) {
+    announced.add(`${key}:start`);
+    return `Начинайте движение: ${instruction}`;
+  }
+  if (remainingMeters <= repeatAt && !announced.has(`${key}:repeat`)) {
+    announced.add(`${key}:warning`);
+    announced.add(`${key}:repeat`);
+    return `Скоро: ${instruction}`;
+  }
+  if (remainingMeters <= warningAt && !announced.has(`${key}:warning`)) {
+    announced.add(`${key}:warning`);
+    return `Через примерно ${Math.max(50, Math.round(warningAt / 50) * 50)} метров: ${instruction}`;
+  }
+  return null;
+}
+
 export function updateArrivalConfirmation(previousCount, accuracy, speed, destinationDistance, previousFix, currentFix) {
   const radius = Math.min(35, Math.max(20, accuracy * 1.2));
   const elapsed = previousFix && currentFix ? (currentFix.timestamp - previousFix.timestamp) / 1000 : 0;

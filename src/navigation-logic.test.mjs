@@ -5,6 +5,7 @@ import {
   advanceManeuverOneStep,
   matchRoutePosition,
   navigationContextIsCurrent,
+  nextVoiceCue,
   offRouteThreshold,
   plausibleGpsTransition,
   routeCumulativeMeters,
@@ -130,6 +131,17 @@ test('one accepted GPS sample cannot advance multiple maneuvers', () => {
   assert.equal(advanceManeuverOneStep(1, maneuvers, 39, 39, cumulative, 39), 1);
   assert.equal(advanceManeuverOneStep(1, maneuvers, 39, 46.9, cumulative, 39), 1);
   assert.equal(advanceManeuverOneStep(1, maneuvers, 46.9, 47, cumulative, 39), 2);
+});
+
+test('voice navigation warns in advance, repeats before the turn, and suppresses duplicates', () => {
+  const announced = new Set();
+  assert.match(nextVoiceCue('route-a', 0, 'Продолжайте движение прямо', 1200, 'car', announced) ?? '', /Начинайте движение/);
+  assert.equal(nextVoiceCue('route-a', 0, 'Продолжайте движение прямо', 1200, 'car', announced), null);
+  assert.equal(nextVoiceCue('route-a', 2, 'Поверните направо', 500, 'car', announced), 'Через примерно 750 метров: Поверните направо');
+  assert.equal(nextVoiceCue('route-a', 2, 'Поверните направо', 490, 'car', announced), null);
+  assert.equal(nextVoiceCue('route-a', 2, 'Поверните направо', 120, 'car', announced), 'Скоро: Поверните направо');
+  assert.equal(nextVoiceCue('route-a', 2, 'Поверните направо', 90, 'car', announced), null);
+  assert.match(nextVoiceCue('route-a', 3, 'Поверните налево', 30, 'car', announced) ?? '', /Скоро/);
 });
 
 test('missing speed alone does not confirm arrival; GPS movement does', () => {

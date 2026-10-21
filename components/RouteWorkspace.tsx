@@ -5,7 +5,7 @@ import { ArrowDownUp, ArrowRight, Bike, CarFront, ChevronDown, Footprints, Locat
 import { MapView } from '@/components/MapView';
 import type { Incident } from '@/data';
 import { incidentPeriodRange, type IncidentPeriodPreset } from '@/periods';
-import { LatestRouteRequestGate, advanceManeuverOneStep, matchRoutePosition, navigationContextIsCurrent, offRouteThreshold, plausibleGpsTransition, pointDistanceMeters, routeCumulativeMeters, updateArrivalConfirmation, updateOffRouteFixCount, validGpsPosition } from '@/navigation-logic.mjs';
+import { LatestRouteRequestGate, advanceManeuverOneStep, matchRoutePosition, navigationContextIsCurrent, nextVoiceCue, offRouteThreshold, plausibleGpsTransition, pointDistanceMeters, routeCumulativeMeters, updateArrivalConfirmation, updateOffRouteFixCount, validGpsPosition } from '@/navigation-logic.mjs';
 
 type Point={lat:number;lon:number};
 type Profile='foot'|'bicycle'|'car'|'motorcycle';
@@ -26,6 +26,7 @@ function routeComparisonSummary(item:Alternative,preference:string,rankingApplie
 function formatEta(seconds:number){const minutes=Math.round(seconds/60);if(minutes<1)return 'меньше минуты';if(minutes<60)return `~${minutes} мин`;const hours=Math.floor(minutes/60),rest=minutes%60;return rest?`~${hours} ч ${rest} мин`:`~${hours} ч`;}
 function formatDistance(meters:number){return meters<1000?`${Math.max(10,Math.round(meters/10)*10)} м`:`${(meters/1000).toFixed(1)} км`;}
 function maxSpeedFor(profile:Profile){return profile==='foot'?10:profile==='bicycle'?30:60;}
+function bearingBetween(a:Point,b:Point){const radians=Math.PI/180;const lat1=a.lat*radians,lat2=b.lat*radians,deltaLon=(b.lon-a.lon)*radians;return(Math.atan2(Math.sin(deltaLon)*Math.cos(lat2),Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(deltaLon))*180/Math.PI+360)%360;}
 
 export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
   const [origin,setOrigin]=useState<Point|null>(null);const [destination,setDestination]=useState<Point|null>(null);const [originLabel,setOriginLabel]=useState('');const [destinationLabel,setDestinationLabel]=useState('');const [activePick,setActivePick]=useState<'origin'|'destination'>('origin');
@@ -34,13 +35,16 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
   const [search,setSearch]=useState('');const [searchResults,setSearchResults]=useState<Place[]>([]);const [searching,setSearching]=useState(false);const [searchError,setSearchError]=useState('');
   const [currentPosition,setCurrentPosition]=useState<Point|null>(null);const [gpsBusy,setGpsBusy]=useState(false);const [gpsError,setGpsError]=useState('');
   const [navigationActive,setNavigationActive]=useState(false);const [activeManeuver,setActiveManeuver]=useState(0);const [remainingStepMeters,setRemainingStepMeters]=useState(0);const [voiceEnabled,setVoiceEnabled]=useState(false);const [arrived,setArrived]=useState(false);const [rerouting,setRerouting]=useState(false);
+  const [navigationHeading,setNavigationHeading]=useState<number|null>(null);const [headingUp,setHeadingUp]=useState(true);
   const [routeRequestGate]=useState(()=>new LatestRouteRequestGate());
   const activeRouteRef=useRef<Alternative|null>(null);activeRouteRef.current=chosen;
   const destinationRef=useRef(destination);destinationRef.current=destination;
+  const currentPositionRef=useRef(currentPosition);currentPositionRef.current=currentPosition;
   const activeManeuverRef=useRef(activeManeuver);activeManeuverRef.current=activeManeuver;
   const buildRouteRef=useRef<((start:Point|null,end:Point|null,keepExisting?:boolean)=>Promise<void>)|null>(null);
   const lastFixRef=useRef<{point:Point;timestamp:number;accuracy:number}|null>(null);const routeProgressRef=useRef<{segmentIndex:number;progress_m:number}|null>(null);const offRouteFixesRef=useRef(0);const lastRerouteAtRef=useRef(0);const arrivalFixesRef=useRef(0);const lastManeuverAdvanceProgressRef=useRef(0);
   const activeRouteVersionRef=useRef(0);const navigationSessionRef=useRef(0);const locationRequestRef=useRef(0);
+  const announcedVoiceCuesRef=useRef<Set<string>>(new Set());
   const selected=useMemo(()=>[origin,destination].filter((x):x is Point=>!!x),[origin,destination]);
   const routeLines=useMemo(()=>alternatives.map((item)=>({id:item.id,coordinates:item.geometry.coordinates,selected:chosen?.id===item.id})),[alternatives,chosen]);
 
@@ -69,9 +73,10 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
 
   useEffect(()=>{
     const query=search.trim();if(query.length<3){setSearchResults([]);setSearchError('');return;}
-    const controller=new AbortController();const timer=setTimeout(async()=>{setSearching(true);setSearchError('');try{const response=await fetch(`/api/v1/geocode?q=${encodeURIComponent(query)}`,{signal:controller.signal});const data=await response.json();if(!response.ok)throw new Error(data.error??'Поиск мест временно недоступен.');setSearchResults(data.results??[]);}catch(err){if(!controller.signal.aborted)setSearchError(err instanceof Error?err.message:'Не удалось выполнить поиск.');}finally{if(!controller.signal.aborted)setSearching(false);}},450);
+    const bias=currentPositionRef.current??origin;const parameters=new URLSearchParams({q:query});if(bias){parameters.set('lat',String(bias.lat));parameters.set('lon',String(bias.lon));}
+    const controller=new AbortController();const timer=setTimeout(async()=>{setSearching(true);setSearchError('');try{const response=await fetch(`/api/v1/geocode?${parameters}`,{signal:controller.signal});const data=await response.json();if(!response.ok)throw new Error(data.error??'Поиск мест временно недоступен.');setSearchResults(data.results??[]);}catch(err){if(!controller.signal.aborted)setSearchError(err instanceof Error?err.message:'Не удалось выполнить поиск.');}finally{if(!controller.signal.aborted)setSearching(false);}},450);
     return()=>{clearTimeout(timer);controller.abort();};
-  },[search]);
+  },[search,origin]);
 
   function useCurrentLocation(){
     if(!navigator.geolocation){setGpsError('Браузер не поддерживает определение местоположения.');return;}
@@ -82,7 +87,7 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
   function startNavigation(){
     if(!chosen)return;
     if(!navigator.geolocation){setGpsError('Для навигации разрешите доступ к местоположению в браузере.');return;}
-    locationRequestRef.current++;const session=++navigationSessionRef.current;const routeVersion=activeRouteVersionRef.current;setGpsError('');setArrived(false);setNavigationActive(true);setActiveManeuver(0);setRemainingStepMeters(chosen.maneuvers[0]?.length_m??0);lastFixRef.current=null;routeProgressRef.current={segmentIndex:0,progress_m:0};lastManeuverAdvanceProgressRef.current=0;offRouteFixesRef.current=0;arrivalFixesRef.current=0;
+    locationRequestRef.current++;const session=++navigationSessionRef.current;const routeVersion=activeRouteVersionRef.current;setGpsError('');setArrived(false);setNavigationActive(true);setHeadingUp(true);setNavigationHeading(null);setActiveManeuver(0);setRemainingStepMeters(chosen.maneuvers[0]?.length_m??0);lastFixRef.current=null;routeProgressRef.current={segmentIndex:0,progress_m:0};lastManeuverAdvanceProgressRef.current=0;offRouteFixesRef.current=0;arrivalFixesRef.current=0;announcedVoiceCuesRef.current.clear();
     navigator.geolocation.getCurrentPosition(position=>{if(!navigationContextIsCurrent({session,routeVersion},{session:navigationSessionRef.current,routeVersion:activeRouteVersionRef.current}))return;if(!validGpsPosition(position)){setGpsError('Ожидаю более точное GPS-положение.');return;}setCurrentPosition({lat:position.coords.latitude,lon:position.coords.longitude});},()=>{if(navigationContextIsCurrent({session,routeVersion},{session:navigationSessionRef.current,routeVersion:activeRouteVersionRef.current}))setGpsError('Ожидаю разрешение на местоположение. Включите геолокацию, чтобы видеть позицию на карте.');},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
   }
 
@@ -94,7 +99,7 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
       if(!validGpsPosition(position)){setGpsError('GPS пока недостаточно точный или устарел; последнее положение сохранено.');return;}
       const point={lat:position.coords.latitude,lon:position.coords.longitude};const accuracy=position.coords.accuracy;const timestamp=position.timestamp;const previousFix=lastFixRef.current;
       if(!plausibleGpsTransition(previousFix,{point,timestamp,accuracy},maxSpeedFor(profile))){setGpsError('GPS сообщил невозможный скачок положения; измерение отброшено.');return;}
-      lastFixRef.current={point,timestamp,accuracy};setCurrentPosition(point);setGpsError('');
+      lastFixRef.current={point,timestamp,accuracy};setCurrentPosition(point);setGpsError('');const measuredHeading=previousFix&&pointDistanceMeters(previousFix.point,point)>=5?bearingBetween(previousFix.point,point):position.coords.heading;if(Number.isFinite(measuredHeading))setNavigationHeading(measuredHeading);
       const route=activeRouteRef.current;if(!route)return;const measure=routeCumulativeMeters(route.geometry.coordinates);const previousMatch=routeProgressRef.current;const elapsed=previousFix?Math.max(0.5,(timestamp-previousFix.timestamp)/1000):5;const measuredSpeed=position.coords.speed??(previousFix?pointDistanceMeters(previousFix.point,point)/elapsed:0);const match=matchRoutePosition(point,route.geometry.coordinates,previousMatch,measure,maxSpeedFor(profile)*elapsed+Math.max(accuracy*2,50),{elapsedSeconds:elapsed,speedMps:Math.min(maxSpeedFor(profile),measuredSpeed),heading:position.coords.heading});
       if(!Number.isFinite(match.distance_m))return;
       if(match.matched!==false)routeProgressRef.current={segmentIndex:match.segmentIndex,progress_m:match.progress_m};
@@ -108,10 +113,13 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
   },[navigationActive,chosen,profile]);
 
   useEffect(()=>{
-    if(!navigationActive||!voiceEnabled||!chosen||typeof window==='undefined'||!('speechSynthesis'in window))return;
+    if(typeof window==='undefined'||!('speechSynthesis'in window))return;
+    if(!navigationActive||!voiceEnabled||!chosen){window.speechSynthesis.cancel();return;}
     const instruction=chosen.maneuvers[activeManeuver]?.instruction;if(!instruction)return;
-    window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(instruction);utterance.lang='ru-RU';window.speechSynthesis.speak(utterance);
-  },[navigationActive,voiceEnabled,chosen,activeManeuver]);
+    const announcement=nextVoiceCue(chosen.id,activeManeuver,instruction,remainingStepMeters,profile,announcedVoiceCuesRef.current);
+    if(!announcement)return;
+    window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(announcement);utterance.lang='ru-RU';window.speechSynthesis.speak(utterance);
+  },[navigationActive,voiceEnabled,chosen,activeManeuver,remainingStepMeters,profile]);
 
   const navManeuver=chosen?.maneuvers[Math.min(activeManeuver,Math.max(0,(chosen?.maneuvers.length??1)-1))];
   const offRoute=navigationActive&&(rerouting||offRouteFixesRef.current>=3);
@@ -120,8 +128,8 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
 
   return <main className="route-page route-experience">
     <section className="route-map-wrap">
-      <MapView incidents={incidents} onPick={onPick} selected={mapSelection} routeAlternatives={routeLines} currentPosition={currentPosition} navigationActive={navigationActive}/>
-      <div className="route-map-toolbar"><span><LocateFixed size={15}/>Астана</span><span className="route-map-hint"><MousePointer2 size={14}/>{navigationActive?'Навигация включена':alternatives.length?'Нажмите на маршрут, чтобы сравнить варианты':'Найдите место или выберите точки на карте'}</span></div>
+      <MapView incidents={incidents} onPick={onPick} selected={mapSelection} routeAlternatives={routeLines} currentPosition={currentPosition} navigationActive={navigationActive} navigationHeading={navigationHeading} headingUp={headingUp}/>
+      <div className="route-map-toolbar"><span><LocateFixed size={15}/>Астана</span><span className="route-map-hint"><MousePointer2 size={14}/>{navigationActive?'Навигация включена':alternatives.length?'Нажмите на маршрут, чтобы сравнить варианты':'Найдите место или выберите точки на карте'}</span>{navigationActive&&<button className="route-camera-toggle" onClick={()=>setHeadingUp(value=>!value)} aria-pressed={headingUp} title={headingUp?'Север сверху':'Курс сверху'}><Navigation size={14}/>{headingUp?'По курсу':'На север'}</button>}</div>
       <div className="route-map-legend"><span><i className="legend-start"/>Начало</span><span><i className="legend-end"/>Конец</span><span><i className="legend-route"/>Выбранный путь</span></div>
       <div className="route-map-footer"><span>Маршруты Valhalla · карта OpenStreetMap</span><span>© OpenStreetMap</span></div>
     </section>
@@ -136,7 +144,7 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
         <small>{arrived?'Пункт назначения рядом':navManeuver?`Осталось по шагу: ${formatDistance(remainingStepMeters)}`:'Следуйте по выделенному маршруту'}</small>
         {offRoute&&<div className="off-route-message"><span>{rerouting?'Подтверждено отклонение. Перестраиваю путь…':'Подтверждено отклонение от маршрута'}</span></div>}
         {gpsError&&<p className="navigation-gps-note">{gpsError}</p>}
-        <div className="active-navigation-actions"><span>{arrived?'Пункт назначения':`До конца: ${formatEta(navRemainingSeconds)}`}</span><button onClick={()=>{navigationSessionRef.current++;setNavigationActive(false);setArrived(false);setRerouting(false);window.speechSynthesis?.cancel();}}>Завершить</button></div>
+        <div className="active-navigation-actions"><span>{arrived?'Пункт назначения':`До конца: ${formatEta(navRemainingSeconds)}`}</span><button onClick={()=>{navigationSessionRef.current++;setNavigationActive(false);setArrived(false);setRerouting(false);setNavigationHeading(null);window.speechSynthesis?.cancel();}}>Завершить</button></div>
       </div>}
 
       <div className="route-search-box"><Search size={16}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Поиск адреса или места" aria-label="Поиск адреса или места"/><span>{searching?'…':''}</span></div>

@@ -24,6 +24,7 @@ export function plausibleGpsTransition(
 export function offRouteThreshold(accuracy: number): number;
 export function updateOffRouteFixCount(previousCount: number, distance: number, threshold: number, confirmations?: number): { count: number; confirmed: boolean };
 export function advanceManeuverOneStep(current: number, maneuvers: NavigationManeuver[], previousProgress: number, progress: number, cumulative: number[], lastAdvanceProgress?: number, margin?: number): number;
+export function nextVoiceCue(routeId: string, maneuverIndex: number, instruction: string, remainingMeters: number, profile: 'foot' | 'bicycle' | 'car' | 'motorcycle', announced: Set<string>): string | null;
 export type NavigationFix = { point: NavigationPoint; timestamp: number; accuracy: number };
 export function updateArrivalConfirmation(previousCount: number, accuracy: number, speed: number | null, destinationDistance: number, previousFix: NavigationFix | null, currentFix: NavigationFix): { count: number; arrived: boolean };
 

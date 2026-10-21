@@ -8,12 +8,13 @@
     "db:migrate": "node scripts/migrate.mjs",
     "import:qamqor": "node --experimental-strip-types scripts/import-qamqor.mjs",
     "sync:worker": "node --experimental-strip-types scripts/sync-worker.mjs",
-    "test:navigation": "node --test src/navigation-logic.test.mjs",
+    "test:navigation": "node --test src/navigation-logic.test.mjs src/route-diversity.test.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tomickigrzegorz/leaflet-rotate": "^0.3.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.55.0",
     "next": "^15.5.27",

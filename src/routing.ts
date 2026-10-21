@@ -1,3 +1,5 @@
+import { filterDistinctRoutes } from './route-diversity.mjs';
+
 export type Point = { lat: number; lon: number };
 export type GeoJsonLineString = { type: 'LineString'; coordinates: [number, number][] };
 export type TravelProfile = 'foot' | 'bicycle' | 'car' | 'motorcycle';
@@ -137,7 +139,7 @@ export async function buildRoutes(origin: Point, destination: Point, profile: Tr
         costing_options: { [costing]: { use_ferry: 0.0 } },
         units: 'kilometers',
         shape_format: 'geojson',
-        alternates: 2,
+        alternates: 3,
         directions_options: { units: 'kilometers', language: 'ru-RU', directions_type: 'instructions' },
       }),
     });
@@ -149,7 +151,8 @@ export async function buildRoutes(origin: Point, destination: Point, profile: Tr
     const routes = [payload.trip, ...(payload.alternates ?? []).map((alternate) => alternate.trip).filter((trip): trip is NonNullable<typeof trip> => !!trip)]
       .map((trip, index) => normalizeTrip(trip, `${costing}-${index + 1}`));
     const unique = routes.filter((route, index) => routes.findIndex((candidate) => candidate.geometry.coordinates.length === route.geometry.coordinates.length && candidate.geometry.coordinates.every((point, i) => point[0] === route.geometry.coordinates[i][0] && point[1] === route.geometry.coordinates[i][1])) === index);
-    const ordered = preference === 'shortest' ? [...unique].sort((a, b) => a.distance_m - b.distance_m) : unique;
+    const distinct = filterDistinctRoutes(unique);
+    const ordered = preference === 'shortest' ? [...distinct].sort((a, b) => a.distance_m - b.distance_m) : distinct;
     return ordered.map((route, index) => ({ ...route, id: `${costing}-${index + 1}` }));
   } catch (error) {
     if (error instanceof Error && 'code' in error) throw error;
