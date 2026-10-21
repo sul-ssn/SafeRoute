@@ -1,5 +1,5 @@
 import { getRiskRecords } from '@/db';
-import { assessRouteExposure, compareRouteExposures, type RouteExposure } from '@/risk';
+import { assessRouteExposure, compareRouteExposures } from '@/risk';
 import { buildRoutes } from '@/routing';
 import { routeRequestSchema } from '@/validation';
 
@@ -15,19 +15,24 @@ export async function POST(request: Request) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Almaty' }).format(new Date());
     const period = { from: parsed.data.from ?? '2026-01-01', to: parsed.data.to ?? today };
     const routes = await buildRoutes(origin, destination, profile, preference);
-    const riskData = await Promise.all(routes.map(async (route): Promise<RouteExposure> => {
+    const assessments = await Promise.all(routes.map(async (route) => {
       try {
         const data = await getRiskRecords(route.geometry, period);
-        return assessRouteExposure(route.geometry, data.records, data.sources, period);
+        const risk = assessRouteExposure(route.geometry, data.records, data.sources, period);
+        const sourceHasRows = data.sources.some((source) => Number(source.record_count) > 0);
+        const syncFailed = data.sources.some((source) => source.last_sync_status === 'failed');
+        const dataStatus = syncFailed ? sourceHasRows ? 'stale_snapshot' : 'source_error' : !sourceHasRows ? 'no_source_data' : data.records.length === 0 ? 'no_nearby_events' : risk.confidence === 'insufficient_data' ? 'insufficient_statistics' : 'available';
+        return { risk, dataStatus };
       } catch {
-        return assessRouteExposure(route.geometry, [], [], period);
+        return { risk: assessRouteExposure(route.geometry, [], [], period), dataStatus: 'unavailable' as const };
       }
     }));
-    const comparedRisk = compareRouteExposures(riskData);
+    const comparedRisk = compareRouteExposures(assessments.map((item) => item.risk));
     const withRisk = routes.map((route, index) => {
       const risk = comparedRisk[index];
       return {
         ...route,
+        risk_data_status: assessments[index].dataStatus,
         snapped_origin: { lon: route.geometry.coordinates[0][0], lat: route.geometry.coordinates[0][1] },
         snapped_destination: { lon: route.geometry.coordinates.at(-1)![0], lat: route.geometry.coordinates.at(-1)![1] },
         risk_score: risk.score,
@@ -45,6 +50,8 @@ export async function POST(request: Request) {
         risk_category_counts: risk.category_counts,
       };
     });
+    const riskCanRank = assessments.every(({ dataStatus, risk }) => (dataStatus === 'available' || dataStatus === 'stale_snapshot') && risk.confidence !== 'insufficient_data');
+    if (preference === 'less_events' && riskCanRank) withRisk.sort((a, b) => (a.crime_exposure_per_km + a.traffic_accident_exposure_per_km) - (b.crime_exposure_per_km + b.traffic_accident_exposure_per_km));
     return Response.json({
       routes: withRisk, provider: 'valhalla', data_mode: 'osm', profile,
       risk_period: period,

@@ -70,12 +70,13 @@ export async function getRiskRecords(geometry: { type: 'LineString'; coordinates
         AND i.geom IS NOT NULL AND i.occurred_at BETWEEN $2::date AND $3::date
         AND ST_DWithin(i.geom::geography, r.path, 150)`, [JSON.stringify(geometry), period.from, period.to]),
     query<RiskSource>(`SELECT s.id,s.name,s.source_url,s.attribution,s.coverage_start::text,s.coverage_end::text,
-        s.coverage_completeness,s.spatial_precision_m,s.retrieved_at,
+        s.coverage_completeness,s.spatial_precision_m,s.retrieved_at,sync.status AS last_sync_status,
         max(i.occurred_at)::text AS last_event_date,count(i.id)::int AS record_count,
         CASE WHEN s.id='qamqor-crime-astana-2026' THEN 'crime' ELSE 'traffic_accident' END AS event_type
       FROM data_sources s LEFT JOIN incidents i ON i.source_id=s.id AND i.is_synthetic=false
+      LEFT JOIN LATERAL (SELECT sr.status FROM source_sync_runs sr WHERE sr.source_id=s.id ORDER BY sr.started_at DESC LIMIT 1) sync ON true
       WHERE s.sync_adapter='qamqor-arcgis-v1' AND s.data_mode='real'
-      GROUP BY s.id ORDER BY s.id`),
+      GROUP BY s.id,sync.status ORDER BY s.id`),
   ]);
   return {
     records: result.rows.map((row) => ({ ...row, synthetic: false, dataMode: 'real' as const })),

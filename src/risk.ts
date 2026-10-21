@@ -34,6 +34,7 @@ export type RiskSource = {
   last_event_date: string | null;
   record_count: number;
   event_type: 'crime' | 'traffic_accident';
+  last_sync_status?: 'completed' | 'failed' | 'running' | 'adapter_unconfigured' | null;
 };
 
 export type RiskPeriod = { from: string; to: string };
