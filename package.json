@@ -8,6 +8,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "import:qamqor": "node --experimental-strip-types scripts/import-qamqor.mjs",
     "sync:worker": "node --experimental-strip-types scripts/sync-worker.mjs",
+    "test:navigation": "node --test src/navigation-logic.test.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"

@@ -51,6 +51,12 @@
       ],
       "@/ui-data": [
         "./src/ui-data"
+      ],
+      "@/navigation-logic.mjs": [
+        "./src/navigation-logic.mjs"
+      ],
+      "@/risk-data-logic.mjs": [
+        "./src/risk-data-logic.mjs"
       ]
     }
   },

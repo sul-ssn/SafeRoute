@@ -2,6 +2,7 @@ import { getRiskRecords } from '@/db';
 import { assessRouteExposure, compareRouteExposures } from '@/risk';
 import { buildRoutes } from '@/routing';
 import { routeRequestSchema } from '@/validation';
+import { canRankByRiskExposure, classifyRouteRiskData, loadOptionalRouteRisk, MAX_RISK_SOURCE_AGE_DAYS } from '@/risk-data-logic.mjs';
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -15,24 +16,21 @@ export async function POST(request: Request) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Almaty' }).format(new Date());
     const period = { from: parsed.data.from ?? '2026-01-01', to: parsed.data.to ?? today };
     const routes = await buildRoutes(origin, destination, profile, preference);
-    const assessments = await Promise.all(routes.map(async (route) => {
-      try {
-        const data = await getRiskRecords(route.geometry, period);
-        const risk = assessRouteExposure(route.geometry, data.records, data.sources, period);
-        const sourceHasRows = data.sources.some((source) => Number(source.record_count) > 0);
-        const syncFailed = data.sources.some((source) => source.last_sync_status === 'failed');
-        const dataStatus = syncFailed ? sourceHasRows ? 'stale_snapshot' : 'source_error' : !sourceHasRows ? 'no_source_data' : data.records.length === 0 ? 'no_nearby_events' : risk.confidence === 'insufficient_data' ? 'insufficient_statistics' : 'available';
-        return { risk, dataStatus };
-      } catch {
-        return { risk: assessRouteExposure(route.geometry, [], [], period), dataStatus: 'unavailable' as const };
-      }
-    }));
+    const assessments = await Promise.all(routes.map((route) => loadOptionalRouteRisk(route, async (currentRoute: typeof route) => {
+        const data = await getRiskRecords(currentRoute.geometry, period);
+        const risk = assessRouteExposure(currentRoute.geometry, data.records, data.sources, period);
+        const dataStatus = classifyRouteRiskData({ sources: data.sources, records: data.records, riskConfidence: risk.confidence });
+        return { risk, ...dataStatus };
+      }, (unavailableRoute: typeof route) => ({ risk: assessRouteExposure(unavailableRoute.geometry, [], [], period), status: 'unavailable' as const, sourceAgeDays: null, maxAgeDays: MAX_RISK_SOURCE_AGE_DAYS, staleReason: null }))));
     const comparedRisk = compareRouteExposures(assessments.map((item) => item.risk));
     const withRisk = routes.map((route, index) => {
       const risk = comparedRisk[index];
       return {
         ...route,
-        risk_data_status: assessments[index].dataStatus,
+        risk_data_status: assessments[index].status,
+        risk_data_age_days: assessments[index].sourceAgeDays,
+        risk_data_max_age_days: assessments[index].maxAgeDays,
+        risk_data_stale_reason: assessments[index].staleReason,
         snapped_origin: { lon: route.geometry.coordinates[0][0], lat: route.geometry.coordinates[0][1] },
         snapped_destination: { lon: route.geometry.coordinates.at(-1)![0], lat: route.geometry.coordinates.at(-1)![1] },
         risk_score: risk.score,
@@ -50,10 +48,11 @@ export async function POST(request: Request) {
         risk_category_counts: risk.category_counts,
       };
     });
-    const riskCanRank = assessments.every(({ dataStatus, risk }) => (dataStatus === 'available' || dataStatus === 'stale_snapshot') && risk.confidence !== 'insufficient_data');
-    if (preference === 'less_events' && riskCanRank) withRisk.sort((a, b) => (a.crime_exposure_per_km + a.traffic_accident_exposure_per_km) - (b.crime_exposure_per_km + b.traffic_accident_exposure_per_km));
+    const riskCanRank = canRankByRiskExposure(assessments.map(({ status, sourceAgeDays, risk }) => ({ status, sourceAgeDays, confidence: risk.confidence })));
+    const riskRankingApplied = preference === 'less_events' && riskCanRank && withRisk.length > 1;
+    if (riskRankingApplied) withRisk.sort((a, b) => (a.crime_exposure_per_km + a.traffic_accident_exposure_per_km) - (b.crime_exposure_per_km + b.traffic_accident_exposure_per_km));
     return Response.json({
-      routes: withRisk, provider: 'valhalla', data_mode: 'osm', profile,
+      routes: withRisk, provider: 'valhalla', data_mode: 'osm', profile, risk_ranking_applied: riskRankingApplied,
       risk_period: period,
       snapped_locations: 'Valhalla привязывает исходные координаты к ближайшим доступным рёбрам графа OSM для выбранного транспорта.',
       duration_notice: 'Время — расчёт Valhalla по геометрии и атрибутам дорожного графа для выбранного профиля; актуальные пробки и задержки не учитываются.',
