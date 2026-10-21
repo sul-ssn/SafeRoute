@@ -88,8 +88,8 @@ export function matchRoutePosition(point, coordinates, previous, cumulative, max
   // not move the navigation cursor when it violates progress constraints.
   return {
     ...fallback,
-    segmentIndex: previous.segmentIndex,
-    progress_m: previous.progress_m,
+    segmentIndex: previous?.segmentIndex ?? 0,
+    progress_m: previous?.progress_m ?? 0,
     matched: false,
   };
 }

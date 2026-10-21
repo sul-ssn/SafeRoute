@@ -64,6 +64,20 @@ const northAtMeters = (meters) => origin.lat + meters / 111320;
 const measuredRoute = Array.from({ length: 11 }, (_, index) => [origin.lon, northAtMeters(index * 50)]);
 const measuredCumulative = routeCumulativeMeters(measuredRoute);
 
+test('first GPS fix outside snap distance remains unmatched with safe initial progress', () => {
+  const farAway = matchRoutePosition(
+    { lat: northAtMeters(120), lon: lonAtMeters(250) },
+    measuredRoute,
+    null,
+    measuredCumulative,
+    50,
+  );
+  assert.equal(farAway.matched, false);
+  assert.equal(farAway.segmentIndex, 0);
+  assert.equal(farAway.progress_m, 0);
+  assert.ok(farAway.distance_m > 100);
+});
+
 test('turning onto a new road cannot pull progress forward to a distant route segment', () => {
   const previous = { segmentIndex: 1, progress_m: 50 };
   const diverted = matchRoutePosition(
