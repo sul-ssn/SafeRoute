@@ -1,7 +1,7 @@
 export type NavigationPoint = { lat: number; lon: number };
 export type RouteCoordinate = [number, number];
 export type RouteProgress = { segmentIndex: number; progress_m: number };
-export type RouteMatch = RouteProgress & { distance_m: number; score: number; directionDifference: number };
+export type RouteMatch = RouteProgress & { distance_m: number; score: number; directionDifference: number; matched: boolean };
 export type NavigationManeuver = { end_index: number };
 
 export function pointDistanceMeters(a: NavigationPoint, b: NavigationPoint): number;
@@ -24,7 +24,8 @@ export function plausibleGpsTransition(
 export function offRouteThreshold(accuracy: number): number;
 export function updateOffRouteFixCount(previousCount: number, distance: number, threshold: number, confirmations?: number): { count: number; confirmed: boolean };
 export function advanceManeuverOneStep(current: number, maneuvers: NavigationManeuver[], previousProgress: number, progress: number, cumulative: number[], lastAdvanceProgress?: number, margin?: number): number;
-export function updateArrivalConfirmation(previousCount: number, accuracy: number, speed: number | null, destinationDistance: number): { count: number; arrived: boolean };
+export type NavigationFix = { point: NavigationPoint; timestamp: number; accuracy: number };
+export function updateArrivalConfirmation(previousCount: number, accuracy: number, speed: number | null, destinationDistance: number, previousFix: NavigationFix | null, currentFix: NavigationFix): { count: number; arrived: boolean };
 
 export class LatestRouteRequestGate {
   begin(options?: { replace?: boolean }): null | {

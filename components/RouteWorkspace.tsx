@@ -97,12 +97,12 @@ export function RouteWorkspace({incidents}:{incidents:Incident[]}) {
       lastFixRef.current={point,timestamp,accuracy};setCurrentPosition(point);setGpsError('');
       const route=activeRouteRef.current;if(!route)return;const measure=routeCumulativeMeters(route.geometry.coordinates);const previousMatch=routeProgressRef.current;const elapsed=previousFix?Math.max(0.5,(timestamp-previousFix.timestamp)/1000):5;const measuredSpeed=position.coords.speed??(previousFix?pointDistanceMeters(previousFix.point,point)/elapsed:0);const match=matchRoutePosition(point,route.geometry.coordinates,previousMatch,measure,maxSpeedFor(profile)*elapsed+Math.max(accuracy*2,50),{elapsedSeconds:elapsed,speedMps:Math.min(maxSpeedFor(profile),measuredSpeed),heading:position.coords.heading});
       if(!Number.isFinite(match.distance_m))return;
-      routeProgressRef.current={segmentIndex:match.segmentIndex,progress_m:match.progress_m};
+      if(match.matched!==false)routeProgressRef.current={segmentIndex:match.segmentIndex,progress_m:match.progress_m};
       const offRoute=updateOffRouteFixCount(offRouteFixesRef.current,match.distance_m,offRouteThreshold(accuracy));offRouteFixesRef.current=offRoute.count;
       const now=Date.now();if(offRouteFixesRef.current>=3&&now-lastRerouteAtRef.current>20000&&destinationRef.current){lastRerouteAtRef.current=now;offRouteFixesRef.current=0;setRerouting(true);setGpsError('Вы отклонились от пути. Строю новый маршрут…');void buildRouteRef.current?.(point,destinationRef.current,true);}
       const nextManeuver=advanceManeuverOneStep(activeManeuverRef.current,route.maneuvers,previousMatch?.progress_m??0,match.progress_m,measure,lastManeuverAdvanceProgressRef.current);if(nextManeuver!==activeManeuverRef.current){activeManeuverRef.current=nextManeuver;lastManeuverAdvanceProgressRef.current=match.progress_m;setActiveManeuver(nextManeuver);}
       const maneuver=route.maneuvers[nextManeuver];const endIndex=maneuver?Math.max(0,Math.min(route.geometry.coordinates.length-1,maneuver.end_index)):0;setRemainingStepMeters(maneuver?Math.max(0,measure[endIndex]-match.progress_m):0);
-      const end=destinationRef.current;const arrival=end?updateArrivalConfirmation(arrivalFixesRef.current,accuracy,position.coords.speed,pointDistanceMeters(point,end)):{count:0,arrived:false};arrivalFixesRef.current=arrival.count;if(arrival.arrived)setArrived(true);
+      const end=destinationRef.current;const arrival=end?updateArrivalConfirmation(arrivalFixesRef.current,accuracy,position.coords.speed,pointDistanceMeters(point,end),previousFix,{point,timestamp,accuracy}):{count:0,arrived:false};arrivalFixesRef.current=arrival.count;if(arrival.arrived)setArrived(true);
     },()=>setGpsError('Потеряна геолокация. Проверьте разрешение браузера и GPS.'),{enableHighAccuracy:true,maximumAge:0,timeout:15000});
     return()=>navigator.geolocation.clearWatch(watch);
   },[navigationActive,chosen,profile]);

@@ -60,6 +60,55 @@ test('self-intersection matching continues from the previous segment and does no
   assert.ok(match.progress_m >= previous.progress_m);
 });
 
+const northAtMeters = (meters) => origin.lat + meters / 111320;
+const measuredRoute = Array.from({ length: 11 }, (_, index) => [origin.lon, northAtMeters(index * 50)]);
+const measuredCumulative = routeCumulativeMeters(measuredRoute);
+
+test('turning onto a new road cannot pull progress forward to a distant route segment', () => {
+  const previous = { segmentIndex: 1, progress_m: 50 };
+  const diverted = matchRoutePosition(
+    { lat: northAtMeters(220), lon: lonAtMeters(24) },
+    measuredRoute,
+    previous,
+    measuredCumulative,
+    30,
+  );
+  assert.equal(diverted.matched, false);
+  assert.equal(diverted.progress_m, previous.progress_m);
+  assert.equal(diverted.segmentIndex, previous.segmentIndex);
+  assert.ok(diverted.distance_m < 30);
+});
+
+test('a U-turn behind the cursor cannot move progress backwards or jump ahead', () => {
+  const previous = { segmentIndex: 4, progress_m: 200 };
+  const turnedBack = matchRoutePosition(
+    { lat: northAtMeters(100), lon: origin.lon },
+    measuredRoute,
+    previous,
+    measuredCumulative,
+    25,
+    { elapsedSeconds: 3, speedMps: 5, heading: 180 },
+  );
+  assert.equal(turnedBack.matched, false);
+  assert.equal(turnedBack.progress_m, previous.progress_m);
+  assert.equal(turnedBack.segmentIndex, previous.segmentIndex);
+  assert.ok(turnedBack.distance_m < 2);
+});
+
+test('after an off-route fix, returning to a reachable route segment resumes progress', () => {
+  const previous = { segmentIndex: 2, progress_m: measuredCumulative[2] };
+  const diverted = matchRoutePosition(
+    { lat: northAtMeters(220), lon: lonAtMeters(24) }, measuredRoute, previous, measuredCumulative, 30,
+  );
+  assert.equal(diverted.matched, false);
+  const returned = matchRoutePosition(
+    { lat: northAtMeters(112), lon: origin.lon }, measuredRoute, previous, measuredCumulative, 40,
+  );
+  assert.equal(returned.matched, true);
+  assert.ok(returned.progress_m > previous.progress_m);
+  assert.ok(returned.progress_m < previous.progress_m + 40);
+});
+
 test('one accepted GPS sample cannot advance multiple maneuvers', () => {
   const cumulative = [0, 10, 20, 30, 40];
   const maneuvers = [0, 1, 2, 3].map((end_index) => ({ end_index }));
@@ -69,14 +118,27 @@ test('one accepted GPS sample cannot advance multiple maneuvers', () => {
   assert.equal(advanceManeuverOneStep(1, maneuvers, 46.9, 47, cumulative, 39), 2);
 });
 
-test('passing near the destination does not count as arrival; stopped accurate fixes do', () => {
-  let result = updateArrivalConfirmation(0, 5, 4, 28);
+test('missing speed alone does not confirm arrival; GPS movement does', () => {
+  const destination = { lat: 51, lon: 71.4 };
+  const movedPrevious = { point: destination, timestamp: now, accuracy: 5 };
+  const movedCurrent = { point: { lat: 51, lon: lonAtMeters(8) }, timestamp: now + 1000, accuracy: 5 };
+  let result = updateArrivalConfirmation(2, 5, null, 5, movedPrevious, movedCurrent);
   assert.equal(result.arrived, false);
-  result = updateArrivalConfirmation(0, 5, 0.5, 5);
+  assert.equal(result.count, 0);
+  result = updateArrivalConfirmation(0, 5, null, 5, null, movedCurrent);
   assert.equal(result.arrived, false);
-  result = updateArrivalConfirmation(result.count, 5, 0.2, 5);
+
+  const stationaryPrevious = { point: destination, timestamp: now, accuracy: 5 };
+  const stationaryCurrent = { point: destination, timestamp: now + 1000, accuracy: 5 };
+  result = updateArrivalConfirmation(0, 5, null, 5, stationaryPrevious, stationaryCurrent);
   assert.equal(result.arrived, false);
-  result = updateArrivalConfirmation(result.count, 5, 0, 5);
+  result = updateArrivalConfirmation(result.count, 5, null, 5,
+    stationaryCurrent,
+    { ...stationaryCurrent, timestamp: now + 2000 });
+  assert.equal(result.arrived, false);
+  result = updateArrivalConfirmation(result.count, 5, null, 5,
+    { ...stationaryCurrent, timestamp: now + 2000 },
+    { ...stationaryCurrent, timestamp: now + 3000 });
   assert.equal(result.arrived, true);
 });
 

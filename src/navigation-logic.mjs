@@ -55,15 +55,43 @@ export function matchRoutePosition(point, coordinates, previous, cumulative, max
     const progressPenalty = previous ? Math.min(100, Math.abs(progress - predictedProgress) * 0.3) : 0;
     const headingPenalty = directionDifference > 120 ? (directionDifference - 120) * 0.8 : directionDifference * 0.08;
     const score = distance + progressPenalty + headingPenalty;
-    if (!fallback || score < fallback.score) {
-      fallback = { ...candidate, progress_m: previous ? Math.max(previous.progress_m, Math.min(progress, previous.progress_m + maxAdvance)) : progress, score };
-    }
+    if (!fallback || distance < fallback.distance_m) fallback = candidate;
     if (previous && (progress < previous.progress_m - 25 || progress > previous.progress_m + maxAdvance)) continue;
     if (score < best.score) best = { ...candidate, score };
   }
 
-  if (Number.isFinite(best.distance_m)) return best;
-  return fallback ?? best;
+  const maxSnapDistance = Math.max(50, Math.min(100, maxAdvance * 0.5));
+  if (Number.isFinite(best.distance_m) && best.distance_m <= maxSnapDistance) return { ...best, matched: true };
+  if (!fallback) return { ...best, matched: false };
+
+  // The cursor search is intentionally local. For a rejected match, measure
+  // distance against the full route so off-route detection still has context.
+  for (let index = 0; index < coordinates.length - 1; index++) {
+    const [lonA, latA] = coordinates[index];
+    const [lonB, latB] = coordinates[index + 1];
+    const ax = (lonA - point.lon) * lonScale;
+    const ay = (latA - point.lat) * latScale;
+    const bx = (lonB - point.lon) * lonScale;
+    const by = (latB - point.lat) * latScale;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const denominator = dx * dx + dy * dy;
+    const fraction = denominator ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denominator)) : 0;
+    const distance = Math.hypot(ax + fraction * dx, ay + fraction * dy);
+    if (distance < fallback.distance_m) {
+      const progress = cumulative[index] + (cumulative[index + 1] - cumulative[index]) * fraction;
+      fallback = { ...fallback, segmentIndex: index, distance_m: distance, progress_m: progress };
+    }
+  }
+
+  // A nearest point can still be useful for off-route detection, but it must
+  // not move the navigation cursor when it violates progress constraints.
+  return {
+    ...fallback,
+    segmentIndex: previous.segmentIndex,
+    progress_m: previous.progress_m,
+    matched: false,
+  };
 }
 
 export function validGpsPosition(position, now = Date.now()) {
@@ -106,9 +134,13 @@ export function advanceManeuverOneStep(current, maneuvers, previousProgress, pro
   return progress >= threshold && (crossed || movedSinceLastAdvance) ? current + 1 : current;
 }
 
-export function updateArrivalConfirmation(previousCount, accuracy, speed, destinationDistance) {
+export function updateArrivalConfirmation(previousCount, accuracy, speed, destinationDistance, previousFix, currentFix) {
   const radius = Math.min(35, Math.max(20, accuracy * 1.2));
-  const stopped = speed == null || speed <= 1.5;
+  const elapsed = previousFix && currentFix ? (currentFix.timestamp - previousFix.timestamp) / 1000 : 0;
+  const measuredSpeed = elapsed > 0
+    ? pointDistanceMeters(previousFix.point, currentFix.point) / elapsed
+    : Infinity;
+  const stopped = measuredSpeed <= 1.5 && (speed == null || speed <= 1.5);
   const confirmed = accuracy <= 25 && destinationDistance <= radius && stopped;
   const count = confirmed ? previousCount + 1 : 0;
   return { count, arrived: count >= 3 };
