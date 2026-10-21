@@ -22,7 +22,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER:-saferoute}:${POSTGRES_PASSWORD:-change-me-locally}@db:5432/${POSTGRES_DB:-saferoute}
-      DEV_ADMIN_MODE: ${DEV_ADMIN_MODE:-1}
+      DEV_ADMIN_MODE: ${DEV_ADMIN_MODE:-0}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
       VALHALLA_BASE_URL: ${VALHALLA_BASE_URL:-https://valhalla1.openstreetmap.de}
       NEXT_PUBLIC_OSM_TILE_URL: ${NEXT_PUBLIC_OSM_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
