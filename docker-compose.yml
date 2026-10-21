@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-saferoute}
+      POSTGRES_USER: ${POSTGRES_USER:-saferoute}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-locally}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - saferoute-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-saferoute} -d ${POSTGRES_DB:-saferoute}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-saferoute}:${POSTGRES_PASSWORD:-change-me-locally}@db:5432/${POSTGRES_DB:-saferoute}
+      DEV_ADMIN_MODE: ${DEV_ADMIN_MODE:-1}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      VALHALLA_BASE_URL: ${VALHALLA_BASE_URL:-https://valhalla1.openstreetmap.de}
+      NEXT_PUBLIC_OSM_TILE_URL: ${NEXT_PUBLIC_OSM_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - ./data/imports:/app/data/imports:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "npm run db:migrate && npm run import:qamqor && npm run start -- -p 3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  sync-worker:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-saferoute}:${POSTGRES_PASSWORD:-change-me-locally}@db:5432/${POSTGRES_DB:-saferoute}
+      SYNC_POLL_SECONDS: ${SYNC_POLL_SECONDS:-60}
+      QAMQOR_SYNC_INTERVAL_MINUTES: ${QAMQOR_SYNC_INTERVAL_MINUTES:-1440}
+      QAMQOR_SYNC_DELAY_MS: ${QAMQOR_SYNC_DELAY_MS:-1000}
+    command: ["npm", "run", "sync:worker"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  saferoute-postgres:

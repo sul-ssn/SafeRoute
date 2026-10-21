@@ -1,0 +1,38 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Generated reports, decks, screenshots and render artifacts
+artifacts/
+*.pdf
+*.pptx
+
+# Internal planning and audit material
+AGENTS.md
+*TZ*.md
+*AUDIT*.md
+*INTEGRATION*.md
+DATA_SOURCES.md
+
+# Test suites and test-only scripts (kept locally, not published)
+**/*.test.*
+**/*.spec.*
+scripts/test-*.mjs
+scripts/test-*.js
+
+# Redundant exported CSV copies; GeoJSON snapshots power the local bootstrap
+data/imports/*.csv

@@ -1,0 +1,69 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@/data": [
+        "./src/data"
+      ],
+      "@/validation": [
+        "./src/validation"
+      ],
+      "@/routing": [
+        "./src/routing"
+      ],
+      "@/imports": [
+        "./src/imports"
+      ],
+      "@/risk": [
+        "./src/risk"
+      ],
+      "@/db": [
+        "./src/db"
+      ],
+      "@/periods": [
+        "./src/periods"
+      ],
+      "@/ui-data": [
+        "./src/ui-data"
+      ]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "node_modules.incomplete",
+    ".deps-clean"
+  ]
+}
